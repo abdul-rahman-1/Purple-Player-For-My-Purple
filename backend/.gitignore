@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.local
+.env.example
+.DS_Store
+dist/
+build/
+.vite/
+.next/
+out/
+*.log
+*.swp
+.idea/
+.vscode/settings.json
