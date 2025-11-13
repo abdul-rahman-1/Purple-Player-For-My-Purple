@@ -40,6 +40,9 @@ const apiKeyMiddleware = (req, res, next) => {
 
 // Apply API key middleware to all /api routes
 app.use('/api', apiKeyMiddleware);
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
+});
 
 mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser:true, useUnifiedTopology:true }).then(()=>console.log('✅ MongoDB Connected')).catch(e=>console.error('❌ MongoDB Error:', e.message));
 
@@ -61,7 +64,7 @@ app.get('/', (req, res) => {
     </ul>
     <p><strong>Example:</strong></p>
     <pre>
-curl -H "x-api-key: your-api-key" https://my-purple.up.railway.app/api/tracks
+curl -H "x-api-key: your-api-key" https://purple-player-for-my-purple.onrender.com/api/tracks
     </pre>
   `);
 });

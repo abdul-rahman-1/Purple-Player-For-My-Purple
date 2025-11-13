@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'https://my-purple.up.railway.app/'
+      '/api': 'https://purple-player-for-my-purple.onrender.com/'
     }
   }
 })
