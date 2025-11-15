@@ -165,4 +165,79 @@ router.delete("/:id", async (req, res) => {
     });
   }
 });
+
+// ========== GROUP TRACKS ENDPOINTS ==========
+
+// Get tracks shared only within user's group
+router.get("/group/shared/:userId", async (req, res) => {
+  try {
+    const User = require("../models/User");
+    const user = await User.findById(req.params.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (!user.groupId) {
+      return res.status(400).json({ error: "User not in a group" });
+    }
+
+    // Find all tracks added by users in the same group
+    let Group = require("../models/Group");
+    const group = await Group.findById(user.groupId);
+    
+    if (!group) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+
+    const memberIds = group.members.map(m => m.userId);
+    
+    // Find tracks added only by group members
+    const tracks = await Track.find({ addedBy: { $in: memberIds } })
+      .populate("addedBy", "name email avatar")
+      .sort({ createdAt: -1 });
+
+    res.json({
+      groupId: group._id,
+      groupName: group.groupName,
+      membersCount: group.members.length,
+      tracksCount: tracks.length,
+      tracks: tracks
+    });
+  } catch (err) {
+    console.error("❌ Group tracks error:", err);
+    res.status(500).json({ error: "Failed to fetch group tracks" });
+  }
+});
+
+// Get individual user's track count
+router.get("/user/:userId/count", async (req, res) => {
+  try {
+    const Track = require("../models/Track");
+    const count = await Track.countDocuments({ addedBy: req.params.userId });
+    res.json({ userId: req.params.userId, tracksCount: count });
+  } catch (err) {
+    console.error("❌ User track count error:", err);
+    res.status(500).json({ error: "Failed to count tracks" });
+  }
+});
+
+// Get all tracks by specific user
+router.get("/user/:userId", async (req, res) => {
+  try {
+    const tracks = await Track.find({ addedBy: req.params.userId })
+      .populate("addedBy", "name email avatar")
+      .sort({ createdAt: -1 });
+    
+    res.json({
+      userId: req.params.userId,
+      tracksCount: tracks.length,
+      tracks: tracks
+    });
+  } catch (err) {
+    console.error("❌ User tracks error:", err);
+    res.status(500).json({ error: "Failed to fetch user tracks" });
+  }
+});
+
 module.exports = router;

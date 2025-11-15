@@ -47,13 +47,22 @@ export default function UploadForm({ onAdded }) {
   const [error, setError] = useState('');
   const [detecting, setDetecting] = useState(false);
 
-  // Auto-detect metadata when YouTube link is pasted
   async function handleUrlChange(e) {
     const newUrl = e.target.value;
     setUrl(newUrl);
     setError('');
     
-    if (newUrl.includes('youtube.com') || newUrl.includes('youtu.be')) {
+    // Check if it's a YouTube URL
+    const isYouTube = newUrl.includes('youtube.com') || newUrl.includes('youtu.be');
+    
+    if (newUrl.trim() && !isYouTube && (newUrl.startsWith('http://') || newUrl.startsWith('https://'))) {
+      setError('❌ Only YouTube links are supported. Please paste a YouTube URL.');
+      setTitle('');
+      setArtist('');
+      return;
+    }
+    
+    if (isYouTube) {
       setDetecting(true);
       let videoId = '';
       
@@ -109,10 +118,11 @@ export default function UploadForm({ onAdded }) {
         return;
       }
 
-      // Detect source from URL
-      let source = 'direct';
-      if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        source = 'youtube';
+      // Validate YouTube URL only
+      if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+        setError('❌ Only YouTube links are supported. Please paste a YouTube URL.');
+        setLoading(false);
+        return;
       }
 
       // Validate title and artist are provided
@@ -131,7 +141,7 @@ export default function UploadForm({ onAdded }) {
       const payload = { 
         title: title.trim(), 
         artist: artist.trim(), 
-        source, 
+        source: 'youtube', 
         url: url.trim(), 
         message: message.trim(),
         addedBy: user._id  // CRITICAL: Include user ID
@@ -195,7 +205,7 @@ export default function UploadForm({ onAdded }) {
               required
             />
           </div>
-          <p className="field-hint">Supports: YouTube only • We'll auto-detect title & artist</p>
+          <p className="field-hint">YouTube only • We'll auto-detect title & artist</p>
         </div>
 
         {/* Optional Fields Row */}

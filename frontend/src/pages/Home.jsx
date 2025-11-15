@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useUser } from "../context/UserContext";
 
@@ -14,15 +14,41 @@ function getHeaders(additionalHeaders = {}) {
 }
 
 export default function Home() {
-  const { user, logout } = useUser();
+  const { user, logout, getGroupMembers, getGroupTracks } = useUser();
   const [stats, setStats] = useState({ songs: 0, messages: 0 });
-  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [groupMembers, setGroupMembers] = useState([]);
   const [topSong, setTopSong] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const previousMembersRef = useRef([]);
 
   useEffect(() => {
-    // Load stats from backend (actual count from database)
-    async function loadStats() {
-      try {
+    // Load stats based on user mode
+    loadStats();
+    
+    // If user is in a group, load group members
+    if (user && user.isGroupMode && user.groupId) {
+      loadGroupMembers();
+      // Poll for group members every 5 seconds (only if data changed)
+      const interval = setInterval(loadGroupMembers, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
+  async function loadStats() {
+    try {
+      if (user && user.isGroupMode && user.groupId) {
+        // Load only group tracks
+        const groupData = await getGroupTracks(user._id);
+        const msgCount = groupData.tracks.filter(
+          (t) => t.message && t.message.trim()
+        ).length;
+        setStats({
+          songs: groupData.tracksCount || 0,
+          messages: msgCount,
+        });
+      } else {
+        // Solo user - load all tracks (or could load only their own)
         const response = await fetch(
           import.meta.env.VITE_API_URL + "/api/tracks",
           { headers: getHeaders() }
@@ -37,37 +63,47 @@ export default function Home() {
             messages: msgCount,
           });
         }
-      } catch (err) {
-        console.error("Failed to load stats:", err);
-      }
-    }
-
-    loadStats();
-
-    // Fetch online users from backend
-    loadOnlineUsers();
-
-    // Poll for online users every 5 seconds
-    const interval = setInterval(loadOnlineUsers, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  async function loadOnlineUsers() {
-    try {
-      const response = await fetch(
-        import.meta.env.VITE_API_URL + `/api/users/online`,
-        { headers: getHeaders() }
-      );
-      if (response.ok) {
-        const users = await response.json();
-        setOnlineUsers(users);
       }
     } catch (err) {
-      console.error("Failed to load online users:", err);
+      console.error("Failed to load stats:", err);
     }
   }
 
-  // Simulate top song (in production, fetch from backend)
+  async function loadGroupMembers() {
+    if (!user || !user.isGroupMode || !user.groupId) return;
+    
+    // Only show loading state on initial load, not on polling refreshes
+    if (isInitialLoad) {
+      setLoading(false);
+    }
+    
+    try {
+      const data = await getGroupMembers(user._id);
+      
+      // Only update if members actually changed (prevent flickering)
+      const membersStr = JSON.stringify(data.members || []);
+      const prevStr = JSON.stringify(previousMembersRef.current);
+      
+      if (membersStr !== prevStr) {
+        setGroupMembers(data.members || []);
+        previousMembersRef.current = data.members || [];
+      }
+      
+      // Mark initial load as done after first successful fetch
+      if (isInitialLoad) {
+        setIsInitialLoad(false);
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error("Failed to load group members:", err);
+      // Only update loading state on initial load
+      if (isInitialLoad) {
+        setLoading(false);
+      }
+    }
+  }
+
+  // Fetch top song
   useEffect(() => {
     async function loadTopSong() {
       try {
@@ -104,7 +140,12 @@ export default function Home() {
             <p>A space where every song tells our story</p>
             {user && (
               <div className="user-greeting-section">
-                <p className="user-greeting">Welcome, {user.name}! 👋</p>
+                <p className="user-greeting">
+                  Welcome, {user.name}! 👋
+                  {user.isGroupMode && user.groupRole === 'admin' && (
+                    <span className="badge-admin"> (Group Admin)</span>
+                  )}
+                </p>
                 <button onClick={logout} className="btn-logout">
                   👋 Sign Out
                 </button>
@@ -178,8 +219,12 @@ export default function Home() {
           <div className="stat-card primary">
             <div className="stat-icon">🎵</div>
             <div className="stat-value">{stats.songs}</div>
-            <div className="stat-label">Songs Shared</div>
-            <p className="stat-desc">Amazing moments captured</p>
+            <div className="stat-label">
+              {user && user.isGroupMode ? "Group Songs" : "Songs Shared"}
+            </div>
+            <p className="stat-desc">
+              {user && user.isGroupMode ? "In your group" : "Amazing moments captured"}
+            </p>
           </div>
 
           <div className="stat-card secondary">
@@ -191,9 +236,9 @@ export default function Home() {
 
           <div className="stat-card tertiary">
             <div className="stat-icon">❤️</div>
-            <div className="stat-value">100%</div>
-            <div className="stat-label">Connection</div>
-            <p className="stat-desc">Always here</p>
+            <div className="stat-value">{user && user.isGroupMode ? groupMembers.length : "100%"}</div>
+            <div className="stat-label">{user && user.isGroupMode ? "Members" : "Connection"}</div>
+            <p className="stat-desc">{user && user.isGroupMode ? "In your group" : "Always here"}</p>
           </div>
         </section>
 
@@ -220,61 +265,84 @@ export default function Home() {
           </section>
         )}
 
-        {/* Online Status */}
-        <section className="online-section">
-          <h2>
-            👥 Who's Here ({onlineUsers.filter((u) => u.isOnline).length})
-          </h2>
-          {onlineUsers.length === 0 ? (
-            <div className="no-users">
-              <p>No one is here right now, but you can still add songs! 💜</p>
-            </div>
-          ) : (
-            <div className="online-users">
-              {onlineUsers.map((user, idx) => (
-                <div
-                  key={idx}
-                  className={`user-card ${
-                    user.isOnline ? "online" : "offline"
-                  }`}
-                >
-                  <div className="user-avatar">
-                    {user.avatar ? (
-                      <img src={user.avatar} alt={user.name} className="avatar-image" />
-                    ) : (
-                      user.name.charAt(0).toUpperCase()
-                    )}
-                  </div>
-                  <div className="user-info">
-                    <h3>{user.name}</h3>
-                    <div className="user-status">
-                      <span
-                        className={`status-dot ${
-                          user.isOnline ? "online" : "offline"
-                        }`}
-                      ></span>
-                      <span className="status-text">
-                        {user.isOnline
-                          ? "Online Now"
-                          : `Offline ${getTimeAgo(user.lastSeen)}`}
-                      </span>
+        {/* Online Status - Only show for group users */}
+        {user && user.isGroupMode && (
+          <section className="online-section fade-in">
+            <h2>
+              👥 Group Members ({groupMembers.filter((m) => m.isOnline).length}/{groupMembers.length})
+            </h2>
+            {loading ? (
+              <p>Loading group members...</p>
+            ) : groupMembers.length === 0 ? (
+              <div className="no-users">
+                <p>No other members in your group yet. Invite them to join! 💜</p>
+              </div>
+            ) : (
+              <div className="online-users">
+                {groupMembers.map((member, idx) => (
+                  <div
+                    key={idx}
+                    className={`user-card ${
+                      member.isOnline ? "online" : "offline"
+                    }`}
+                  >
+                    <div className="user-avatar">
+                      {member.avatar ? (
+                        <img src={member.avatar} alt={member.name} className="avatar-image" />
+                      ) : (
+                        member.name.charAt(0).toUpperCase()
+                      )}
                     </div>
-                    {user.currentlyListening && user.isOnline && (
-                      <div className="listening">
-                        <span>🎧 {user.currentlyListening}</span>
+                    <div className="user-info">
+                      <h3>
+                        {member.name}
+                        {member.role === 'admin' && (
+                          <span className="badge-role"> 👑 Admin</span>
+                        )}
+                      </h3>
+                      <div className="user-status">
+                        <span
+                          className={`status-dot ${
+                            member.isOnline ? "online" : "offline"
+                          }`}
+                        ></span>
+                        <span className="status-text">
+                          {member.isOnline
+                            ? "Online Now"
+                            : `Offline ${getTimeAgo(member.lastSeen)}`}
+                        </span>
                       </div>
-                    )}
-                    <p className="last-visit">
-                      {user.isOnline
-                        ? "Active now"
-                        : `Last seen ${getTimeAgo(user.lastSeen)}`}
-                    </p>
+                      {member.currentlyListening && member.isOnline && (
+                        <div className="listening">
+                          <span>🎧 {member.currentlyListening}</span>
+                        </div>
+                      )}
+                      <p className="last-visit">
+                        {member.isOnline
+                          ? "Active now"
+                          : `Last seen ${getTimeAgo(member.lastSeen)}`}
+                      </p>
+                      <p className="member-since">
+                        Joined {getTimeAgo(member.joinedAt)}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Solo User Info */}
+        {user && !user.isGroupMode && (
+          <section className="solo-section">
+            <div className="solo-card">
+              <h2>🎵 Solo Mode</h2>
+              <p>You're currently in solo mode. Your songs are visible only to you.</p>
+              <p className="hint">Want to share music with someone? Go to Add Song to create or join a group!</p>
             </div>
-          )}
-        </section>
+          </section>
+        )}
 
         {/* Action Buttons */}
         <section className="action-buttons">

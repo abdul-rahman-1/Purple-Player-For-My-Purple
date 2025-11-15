@@ -1,39 +1,133 @@
 const express = require('express');
 const User = require('../models/User');
+const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const router = express.Router();
 
-// Register/Get or Create User
+// Utility function to generate unique 16-character code
+function generateGroupCode() {
+  return crypto.randomBytes(8).toString('hex').toUpperCase();
+}
+
+// ============ REGISTRATION ============
+
+// Step 1: Register user with email, name, password, and avatar
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, sessionId, avatar } = req.body;
+    const { name, email, password, avatar } = req.body;
 
-    if (!name || !email) {
-      return res.status(400).json({ error: 'Name and email required' });
+    // Validate inputs
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Name, email, and password required' });
     }
 
-    let user = await User.findOne({ email });
+    // Validate email format
+    if (!email.includes('@')) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
 
-    if (user) {
-      // User exists - update session and avatar if provided
-      user.sessionId = sessionId || uuidv4();
-      user.isOnline = true;
-      user.lastSeen = new Date();
-      if (avatar) {
-        user.avatar = avatar;
-      }
-      await user.save();
-    } else {
-      // Create new user
-      user = new User({
-        name,
-        email,
-        avatar: avatar || null,
-        sessionId: sessionId || uuidv4(),
-        isOnline: true,
-        lastSeen: new Date()
-      });
-      await user.save();
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+
+    // Validate password strength
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
+    if (!passwordRegex.test(password)) {
+      return res.status(400).json({ error: 'Password must be 8+ chars with uppercase, lowercase, number, and special character' });
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+    const sessionId = uuidv4();
+
+    // Create new user
+    const user = new User({
+      name,
+      email,
+      passwordHash,
+      avatar: avatar || null,
+      sessionId,
+      isOnline: true,
+      lastSeen: new Date()
+    });
+
+    await user.save();
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      sessionId: user.sessionId,
+      isOnline: true,
+      isGroupMode: user.isGroupMode,
+      groupId: user.groupId,
+      groupRole: user.groupRole,
+      joinedGroupAt: user.joinedGroupAt
+    });
+  } catch (err) {
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// ============ LOGIN ============
+
+// Step 2: Login with email and password
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Update user status
+    user.isOnline = true;
+    user.lastSeen = new Date();
+    user.sessionId = uuidv4();
+    await user.save();
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      sessionId: user.sessionId,
+      isOnline: true,
+      isGroupMode: user.isGroupMode,
+      groupId: user.groupId,
+      groupRole: user.groupRole,
+      joinedGroupAt: user.joinedGroupAt
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Get user profile (with groupId and groupRole)
+router.get('/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId)
+      .select('name email avatar sessionId isOnline isGroupMode groupId groupRole joinedGroupAt currentlyListening lastListenedSong lastSeen');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
     }
 
     res.json({
@@ -42,17 +136,253 @@ router.post('/register', async (req, res) => {
       email: user.email,
       avatar: user.avatar,
       sessionId: user.sessionId,
-      isOnline: user.isOnline
+      isOnline: user.isOnline,
+      isGroupMode: user.isGroupMode,
+      groupId: user.groupId,
+      groupRole: user.groupRole,
+      joinedGroupAt: user.joinedGroupAt,
+      currentlyListening: user.currentlyListening,
+      lastListenedSong: user.lastListenedSong,
+      lastSeen: user.lastSeen
     });
   } catch (err) {
-    console.error('Register error:', err);
-    res.status(500).json({ error: 'Registration failed' });
+    console.error('Get user error:', err);
+    res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
 
-// Get all online users AND offline users with their status
+// ============ GROUP MANAGEMENT ============
+
+// Step 3a: Generate unique group code for user
+router.post('/generate-group-code/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Generate new unique group code
+    let groupCode;
+    let isUnique = false;
+    while (!isUnique) {
+      groupCode = generateGroupCode();
+      const existing = await User.findOne({ groupCode });
+      if (!existing) {
+        isUnique = true;
+      }
+    }
+
+    user.isGroupMode = true;
+    user.groupCode = groupCode;
+    await user.save();
+
+    res.json({
+      groupCode: groupCode,
+      message: 'Group code generated successfully'
+    });
+  } catch (err) {
+    console.error('Generate code error:', err);
+    res.status(500).json({ error: 'Failed to generate group code' });
+  }
+});
+
+// Step 3b: Create new group or join existing group using group code
+router.post('/join-group/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { groupCode, groupName, createNew } = req.body;
+
+    // Find current user
+    const currentUser = await User.findById(userId);
+    if (!currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if user already in a group
+    if (currentUser.groupId) {
+      return res.status(400).json({ error: 'You are already in a group. Leave first.' });
+    }
+
+    let Group = require('../models/Group');
+
+    if (createNew) {
+      // CREATE NEW GROUP
+      if (!groupName || !groupName.trim()) {
+        return res.status(400).json({ error: 'Group name required' });
+      }
+
+      // Generate unique 16-char group code
+      const generateGroupCode = () => {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let code = '';
+        for (let i = 0; i < 16; i++) {
+          code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return code;
+      };
+
+      const newGroupCode = generateGroupCode();
+
+      // Create new group with current user as admin
+      const newGroup = new Group({
+        groupName: groupName.trim(),
+        groupCode: newGroupCode,
+        members: [
+          {
+            userId: currentUser._id,
+            role: 'admin',
+            joinedAt: new Date()
+          }
+        ],
+        totalSongs: 0,
+        totalMessages: 0
+      });
+
+      await newGroup.save();
+      console.log('✅ New group created:', newGroup.groupCode, 'by', currentUser.name);
+
+      // Update user
+      await User.updateOne(
+        { _id: currentUser._id },
+        {
+          $set: {
+            isGroupMode: true,
+            groupId: newGroup._id,
+            groupRole: 'admin',
+            joinedGroupAt: new Date()
+          }
+        }
+      );
+
+      res.json({
+        _id: currentUser._id,
+        name: currentUser.name,
+        groupId: newGroup._id,
+        groupCode: newGroupCode,
+        groupName: newGroup.groupName,
+        groupRole: 'admin',
+        message: 'Group created successfully! Share code to invite others.'
+      });
+    } else {
+      // JOIN EXISTING GROUP
+      if (!groupCode || !groupCode.trim()) {
+        return res.status(400).json({ error: 'Group code required' });
+      }
+
+      // Find group by code
+      const group = await Group.findOne({ groupCode: groupCode.toUpperCase().trim() });
+      if (!group) {
+        return res.status(404).json({ error: 'Invalid group code' });
+      }
+
+      console.log('✅ Group found:', group.groupCode, 'members:', group.members.length);
+
+      // Check if user already in this group
+      const alreadyMember = group.members.some(m => m.userId.toString() === userId);
+      if (alreadyMember) {
+        return res.status(400).json({ error: 'You are already in this group' });
+      }
+
+      // Add user to group
+      group.members.push({
+        userId: currentUser._id,
+        role: 'member',
+        joinedAt: new Date()
+      });
+
+      await group.save();
+      console.log('✅ User added to group. Total members:', group.members.length);
+
+      // Update user
+      await User.updateOne(
+        { _id: currentUser._id },
+        {
+          $set: {
+            isGroupMode: true,
+            groupId: group._id,
+            groupRole: 'member',
+            joinedGroupAt: new Date()
+          }
+        }
+      );
+
+      res.json({
+        _id: currentUser._id,
+        name: currentUser.name,
+        groupId: group._id,
+        groupCode: group.groupCode,
+        groupName: group.groupName,
+        groupRole: 'member',
+        membersCount: group.members.length,
+        message: `Successfully joined group: ${group.groupName}`
+      });
+    }
+  } catch (err) {
+    console.error('Join group error:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to join group' });
+  }
+});
+
+// Leave group
+router.post('/leave-group/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // If user has a partner, update partner too
+    if (user.groupMemberId) {
+      const partner = await User.findById(user.groupMemberId);
+      if (partner) {
+        partner.isGroupMode = false;
+        partner.groupMemberId = null;
+        await partner.save();
+      }
+    }
+
+    // Update current user
+    user.isGroupMode = false;
+    user.groupMemberId = null;
+    user.groupCode = null;
+    await user.save();
+
+    res.json({ message: 'Successfully left group' });
+  } catch (err) {
+    console.error('Leave group error:', err);
+    res.status(500).json({ error: 'Failed to leave group' });
+  }
+});
+
+// Get group partner info
+router.get('/group-partner/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user || !user.groupMemberId) {
+      return res.status(404).json({ error: 'Not in a group' });
+    }
+
+    const partner = await User.findById(user.groupMemberId).select('_id name email avatar isOnline lastSeen');
+    res.json(partner);
+  } catch (err) {
+    console.error('Get partner error:', err);
+    res.status(500).json({ error: 'Failed to get partner info' });
+  }
+});
+
+// ============ EXISTING ENDPOINTS ============
+
+// Get online users (group-filtered if user in group, solo-mode returns empty)
 router.get('/online', async (req, res) => {
   try {
+    const userId = req.query.userId; // Optional: pass userId to get only group members
+
     // Mark users offline if no heartbeat in 30+ seconds
     const thirtySecondsAgo = new Date(Date.now() - 30000);
     await User.updateMany(
@@ -60,9 +390,37 @@ router.get('/online', async (req, res) => {
       { isOnline: false }
     );
 
-    // Get all users (both online and offline)
-    const users = await User.find().select('name email avatar currentlyListening lastSeen isOnline').sort({ lastSeen: -1 });
-    res.json(users);
+    // If userId provided, return only their group members
+    if (userId) {
+      const user = await User.findById(userId);
+      
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (user.isGroupMode && user.groupId) {
+        // Group user: return only group members
+        let Group = require('../models/Group');
+        const group = await Group.findById(user.groupId);
+        
+        if (!group) {
+          return res.status(404).json({ error: 'Group not found' });
+        }
+
+        const memberIds = group.members.map(m => m.userId.toString());
+        const users = await User.find({ _id: { $in: memberIds } })
+          .select('name email avatar currentlyListening lastSeen isOnline isGroupMode')
+          .sort({ lastSeen: -1 });
+        
+        return res.json(users);
+      } else {
+        // Solo user: return empty (they don't see who's online)
+        return res.json([]);
+      }
+    }
+
+    // No userId provided - for backwards compatibility, return empty to avoid data leaks
+    res.json([]);
   } catch (err) {
     console.error('Online users error:', err);
     res.status(500).json({ error: 'Failed to fetch online users' });
@@ -107,7 +465,7 @@ router.put('/offline/:userId', async (req, res) => {
 // Get user activity status
 router.get('/status/:email', async (req, res) => {
   try {
-    const user = await User.findOne({ email: req.params.email }).select('name email avatar isOnline currentlyListening lastSeen lastListenedSong');
+    const user = await User.findOne({ email: req.params.email }).select('name email avatar isOnline currentlyListening lastSeen lastListenedSong isGroupMode');
     if (!user) {
       return res.json({ isOnline: false, lastSeen: null });
     }
@@ -130,6 +488,143 @@ router.post('/heartbeat/:userId', async (req, res) => {
   } catch (err) {
     console.error('Heartbeat error:', err);
     res.status(500).json({ error: 'Heartbeat failed' });
+  }
+});
+
+// ========== GROUP ENDPOINTS ==========
+
+// Get all members of user's group
+router.get('/group/members/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!user.groupId) {
+      return res.status(400).json({ error: 'User not in a group' });
+    }
+
+    let Group = require('../models/Group');
+    const group = await Group.findById(user.groupId).populate('members.userId', 'name email avatar isOnline currentlyListening lastSeen');
+    
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    // Return only group members with their details
+    const members = group.members.map(m => ({
+      userId: m.userId._id,
+      name: m.userId.name,
+      email: m.userId.email,
+      avatar: m.userId.avatar,
+      isOnline: m.userId.isOnline,
+      currentlyListening: m.userId.currentlyListening,
+      lastSeen: m.userId.lastSeen,
+      role: m.role,
+      joinedAt: m.joinedAt
+    }));
+
+    res.json({
+      groupId: group._id,
+      groupName: group.groupName,
+      groupCode: group.groupCode,
+      members: members,
+      totalMembers: group.members.length,
+      totalSongs: group.totalSongs,
+      totalMessages: group.totalMessages,
+      createdAt: group.createdAt
+    });
+  } catch (err) {
+    console.error('Get group members error:', err);
+    res.status(500).json({ error: 'Failed to fetch group members' });
+  }
+});
+
+// Get group info
+router.get('/group/info/:groupId', async (req, res) => {
+  try {
+    let Group = require('../models/Group');
+    const group = await Group.findById(req.params.groupId).populate('members.userId', 'name email avatar isOnline');
+    
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const members = group.members.map(m => ({
+      userId: m.userId._id,
+      name: m.userId.name,
+      email: m.userId.email,
+      avatar: m.userId.avatar,
+      isOnline: m.userId.isOnline,
+      role: m.role,
+      joinedAt: m.joinedAt
+    }));
+
+    res.json({
+      groupId: group._id,
+      groupName: group.groupName,
+      groupCode: group.groupCode,
+      members: members,
+      totalMembers: group.members.length,
+      totalSongs: group.totalSongs,
+      totalMessages: group.totalMessages,
+      createdAt: group.createdAt
+    });
+  } catch (err) {
+    console.error('Get group info error:', err);
+    res.status(500).json({ error: 'Failed to fetch group info' });
+  }
+});
+
+// Leave group
+router.post('/leave-group/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!user.groupId) {
+      return res.status(400).json({ error: 'User not in a group' });
+    }
+
+    let Group = require('../models/Group');
+    const group = await Group.findById(user.groupId);
+
+    // Remove user from group members
+    group.members = group.members.filter(m => m.userId.toString() !== req.params.userId);
+
+    if (group.members.length === 0) {
+      // Delete group if empty
+      await Group.deleteOne({ _id: group._id });
+      console.log('✅ Group deleted (no members):', group.groupCode);
+    } else if (user.groupRole === 'admin') {
+      // Assign new admin if current user was admin
+      group.members[0].role = 'admin';
+      await group.save();
+      console.log('✅ New admin assigned:', group.members[0].userId.name);
+    } else {
+      await group.save();
+    }
+
+    // Update user to solo mode
+    await User.updateOne(
+      { _id: req.params.userId },
+      {
+        $set: {
+          isGroupMode: false,
+          groupId: null,
+          groupRole: null,
+          joinedGroupAt: null
+        }
+      }
+    );
+
+    res.json({ message: 'Successfully left group', groupDeleted: group.members.length === 0 });
+  } catch (err) {
+    console.error('Leave group error:', err);
+    res.status(500).json({ error: 'Failed to leave group' });
   }
 });
 

@@ -29,8 +29,24 @@ export default function Player() {
     try {
       const t = await fetchTracks();
       if (Array.isArray(t)) {
-        setTracks(t);
-        if (t.length > 0 && !selected) setSelected(t[0]);
+        let filteredTracks = t;
+        
+        // If user is in a group, only show tracks from group members
+        if (user && user.isGroupMode && user.groupMemberId) {
+          filteredTracks = t.filter(track => {
+            const trackUserId = track.addedBy?._id || track.addedBy;
+            return trackUserId === user._id || trackUserId === user.groupMemberId;
+          });
+        } else if (user && !user.isGroupMode) {
+          // Solo users only see their own tracks
+          filteredTracks = t.filter(track => {
+            const trackUserId = track.addedBy?._id || track.addedBy;
+            return trackUserId === user._id;
+          });
+        }
+        
+        setTracks(filteredTracks);
+        if (filteredTracks.length > 0 && !selected) setSelected(filteredTracks[0]);
       }
     } catch (err) {
       console.error("Failed to load tracks:", err);

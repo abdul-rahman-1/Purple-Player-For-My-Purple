@@ -6,7 +6,10 @@ const helmet = require('helmet');
 
 const app = express();
 app.use(helmet());
-app.use(express.json());
+
+// Increase payload size limit to handle large base64 images
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Allow all origins (CORS open to everyone)
 app.use(cors());
@@ -44,7 +47,9 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser:true, useUnifiedTopology:true }).then(()=>console.log('✅ MongoDB Connected')).catch(e=>console.error('❌ MongoDB Error:', e.message));
+mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser:true, useUnifiedTopology:true }).then(async ()=>{
+  console.log('✅ MongoDB Connected');
+}).catch(e=>console.error('❌ MongoDB Error:', e.message));
 
 app.get('/', (req, res) => {
   console.log('🌍 Root route accessed');
@@ -64,7 +69,7 @@ app.get('/', (req, res) => {
     </ul>
     <p><strong>Example:</strong></p>
     <pre>
-curl -H "x-api-key: your-api-key" https://purple-player-for-my-purple.onrender.com/api/tracks
+curl -H "x-api-key: your-api-key" http://localhost:4000/api/tracks
     </pre>
   `);
 });
