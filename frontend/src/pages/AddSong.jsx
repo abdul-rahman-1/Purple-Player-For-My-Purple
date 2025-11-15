@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { addTrack } from '../api';
 import { useUser } from '../context/UserContext';
+import { emitTrackAdded } from '../socket';
 
 // Extract metadata (title & artist) from YouTube link
 async function extractMetadataFromUrl(url) {
@@ -138,6 +139,11 @@ export default function AddSong() {
 
       if (res.error) {
         throw new Error(res.message || res.error);
+      }
+
+      // 🔴 Emit real-time update to other group members
+      if (user.groupId) {
+        emitTrackAdded(user.groupId, res, user._id);
       }
 
       const stats = JSON.parse(localStorage.getItem('purpleStats') || '{"songs":0,"messages":0}');

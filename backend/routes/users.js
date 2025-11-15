@@ -628,4 +628,190 @@ router.post('/leave-group/:userId', async (req, res) => {
   }
 });
 
+// ============ PROFILE MANAGEMENT ============
+
+// Get user profile
+router.get('/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).populate('groupId');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      sessionId: user.sessionId,
+      isOnline: user.isOnline,
+      isGroupMode: user.isGroupMode,
+      groupId: user.groupId,
+      groupRole: user.groupRole,
+      joinedGroupAt: user.joinedGroupAt,
+      createdAt: user.createdAt
+    });
+  } catch (err) {
+    console.error('Get profile error:', err);
+    res.status(500).json({ error: 'Failed to get profile' });
+  }
+});
+
+// Update user profile (name and avatar)
+router.put('/profile/:userId', async (req, res) => {
+  try {
+    const { name, avatar } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      {
+        $set: {
+          name: name.trim(),
+          avatar: avatar || null
+        }
+      },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      sessionId: user.sessionId,
+      isOnline: user.isOnline,
+      isGroupMode: user.isGroupMode,
+      groupId: user.groupId,
+      groupRole: user.groupRole,
+      joinedGroupAt: user.joinedGroupAt
+    });
+  } catch (err) {
+    console.error('Update profile error:', err);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// Change password
+router.put('/change-password/:userId', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Both passwords required' });
+    }
+
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Verify current password
+    const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    // Validate new password strength
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({ error: 'New password does not meet requirements' });
+    }
+
+    // Hash new password
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+    await User.updateOne(
+      { _id: req.params.userId },
+      { $set: { passwordHash: newPasswordHash } }
+    );
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+// Send password reset email
+router.post('/reset-email/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // In a real app, you would send an email here
+    // For now, we'll just confirm the request
+    console.log(`📧 Password reset email requested for: ${user.email}`);
+    
+    res.json({ 
+      message: 'Password reset email sent',
+      note: 'Contact abdulrahmanstd955@gmail.com for password reset assistance'
+    });
+  } catch (err) {
+    console.error('Reset email error:', err);
+    res.status(500).json({ error: 'Failed to send reset email' });
+  }
+});
+
+// Delete account
+router.delete('/delete-account/:userId', async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ error: 'Password required' });
+    }
+
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Verify password
+    const isValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Password is incorrect' });
+    }
+
+    // If user is in a group, remove from group
+    if (user.isGroupMode && user.groupId) {
+      const group = await Group.findById(user.groupId);
+      if (group) {
+        group.members = group.members.filter(m => m.userId.toString() !== user._id.toString());
+        
+        if (group.members.length === 0) {
+          // Delete empty group
+          await Group.deleteOne({ _id: group._id });
+        } else if (user.groupRole === 'admin') {
+          // Assign new admin
+          group.members[0].role = 'admin';
+          await group.save();
+        } else {
+          await group.save();
+        }
+      }
+    }
+
+    // Delete all user's tracks
+    const Track = require('../models/Track');
+    await Track.deleteMany({ userId: req.params.userId });
+
+    // Delete user
+    await User.deleteOne({ _id: req.params.userId });
+
+    res.json({ message: 'Account deleted successfully' });
+  } catch (err) {
+    console.error('Delete account error:', err);
+    res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
 module.exports = router;

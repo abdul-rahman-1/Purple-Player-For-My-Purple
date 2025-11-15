@@ -3,8 +3,20 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
+const http = require('http');
+const socketIo = require('socket.io');
 
 const app = express();
+const server = http.createServer(app);
+
+// Socket.IO Configuration with CORS
+const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
 app.use(helmet());
 
 // Increase payload size limit to handle large base64 images
@@ -14,6 +26,78 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Allow all origins (CORS open to everyone)
 app.use(cors());
 app.options('*', cors());
+
+// Store active connections by groupId
+const groupConnections = {};
+
+// Socket.IO Event Handlers
+io.on('connection', (socket) => {
+  console.log('🔌 User connected:', socket.id);
+
+  // User joins a group room
+  socket.on('join-group', (data) => {
+    const { userId, groupId } = data;
+    
+    // Join socket to group room
+    socket.join(`group-${groupId}`);
+    
+    // Track connections by groupId
+    if (!groupConnections[groupId]) {
+      groupConnections[groupId] = [];
+    }
+    groupConnections[groupId].push({ socketId: socket.id, userId });
+    
+    console.log(`✅ User ${userId} joined group ${groupId}`);
+    console.log(`👥 Group ${groupId} members:`, groupConnections[groupId].length);
+  });
+
+  // Track Added - Broadcast to group
+  socket.on('track:added', (data) => {
+    const { groupId, track, userId } = data;
+    console.log(`🎵 Track added in group ${groupId} by user ${userId}`);
+    
+    // Broadcast to all users in the group EXCEPT sender
+    socket.to(`group-${groupId}`).emit('playlist:update', {
+      event: 'track-added',
+      track: track,
+      addedBy: userId,
+      timestamp: new Date()
+    });
+  });
+
+  // Track Removed - Broadcast to group
+  socket.on('track:removed', (data) => {
+    const { groupId, trackId, userId } = data;
+    console.log(`🗑️ Track removed in group ${groupId} by user ${userId}`);
+    
+    // Broadcast to all users in the group EXCEPT sender
+    socket.to(`group-${groupId}`).emit('playlist:update', {
+      event: 'track-removed',
+      trackId: trackId,
+      removedBy: userId,
+      timestamp: new Date()
+    });
+  });
+
+  // User disconnects
+  socket.on('disconnect', () => {
+    console.log('❌ User disconnected:', socket.id);
+    
+    // Remove from all group connections
+    for (const groupId in groupConnections) {
+      groupConnections[groupId] = groupConnections[groupId].filter(
+        conn => conn.socketId !== socket.id
+      );
+      if (groupConnections[groupId].length === 0) {
+        delete groupConnections[groupId];
+      }
+    }
+  });
+
+  socket.on('error', (error) => {
+    console.error('🚨 Socket error:', error);
+  });
+});
 
 // API Key Authentication Middleware
 const apiKeyMiddleware = (req, res, next) => {
@@ -59,6 +143,7 @@ app.get('/', (req, res) => {
     <p>Environment: ${process.env.NODE_ENV || 'development'}</p>
     <p>MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Not Connected'}</p>
     <p>API Key Authentication: <strong>✅ Enabled</strong></p>
+    <p>WebSocket (Socket.IO): <strong>✅ Enabled</strong></p>
     <p>Time: ${new Date().toLocaleString()}</p>
     <hr/>
     <h3>📝 API Documentation</h3>
@@ -78,4 +163,6 @@ app.use('/api/tracks', require('./routes/tracks'));
 app.use('/api/users', require('./routes/users'));
 
 const PORT = process.env.PORT||4000;
-app.listen(PORT, ()=>console.log('🎵 Purple Player server running on port', PORT));
+server.listen(PORT, ()=>console.log('🎵 Purple Player server running on port', PORT));
+
+module.exports = io;

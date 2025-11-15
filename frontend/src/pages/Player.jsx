@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchTracks, deleteTrack } from "../api";
 import { useUser } from "../context/UserContext";
+import { onPlaylistUpdate, emitTrackRemoved } from "../socket";
 
 export default function Player() {
   const navigate = useNavigate();
@@ -12,10 +13,32 @@ export default function Player() {
   const [filter, setFilter] = useState("all");
   const [isPlaying, setIsPlaying] = useState(false);
   const [showPlaylistMobile, setShowPlaylistMobile] = useState(false);
+  const [notification, setNotification] = useState(null);
   const audioRef = React.useRef(null);
 
   useEffect(() => {
     loadTracks();
+  }, [user]); // Reload when user changes
+
+  useEffect(() => {
+    // Listen for real-time playlist updates from other users
+    onPlaylistUpdate((data) => {
+      if (data.event === 'track-added') {
+        console.log('🎵 New track added by:', data.addedBy);
+        // Add new track to playlist
+        setTracks(prevTracks => [data.track, ...prevTracks]);
+        // Show notification
+        setNotification(`✨ ${data.track.addedBy?.name || 'Someone'} added "${data.track.title}"`);
+        setTimeout(() => setNotification(null), 3000);
+      } else if (data.event === 'track-removed') {
+        console.log('🗑️ Track removed by:', data.removedBy);
+        // Remove track from playlist
+        setTracks(prevTracks => prevTracks.filter(t => t._id !== data.trackId));
+        // Show notification
+        setNotification('🗑️ A song was removed from the playlist');
+        setTimeout(() => setNotification(null), 3000);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -26,27 +49,13 @@ export default function Player() {
   }, [selected, user]);
 
   async function loadTracks() {
+    if (!user) return;
+    
     try {
-      const t = await fetchTracks();
+      const t = await fetchTracks(user._id); // Pass userId
       if (Array.isArray(t)) {
-        let filteredTracks = t;
-        
-        // If user is in a group, only show tracks from group members
-        if (user && user.isGroupMode && user.groupMemberId) {
-          filteredTracks = t.filter(track => {
-            const trackUserId = track.addedBy?._id || track.addedBy;
-            return trackUserId === user._id || trackUserId === user.groupMemberId;
-          });
-        } else if (user && !user.isGroupMode) {
-          // Solo users only see their own tracks
-          filteredTracks = t.filter(track => {
-            const trackUserId = track.addedBy?._id || track.addedBy;
-            return trackUserId === user._id;
-          });
-        }
-        
-        setTracks(filteredTracks);
-        if (filteredTracks.length > 0 && !selected) setSelected(filteredTracks[0]);
+        setTracks(t);
+        if (t.length > 0 && !selected) setSelected(t[0]);
       }
     } catch (err) {
       console.error("Failed to load tracks:", err);
@@ -64,10 +73,16 @@ export default function Player() {
     if (!confirmed) return;
 
     try {
-      await deleteTrack(selected._id, user._id);
+      const trackId = selected._id;
+      await deleteTrack(trackId, user._id);
+
+      // 🔴 Emit real-time update to other group members
+      if (user.groupId) {
+        emitTrackRemoved(user.groupId, trackId, user._id);
+      }
 
       // Remove from list
-      const updated = tracks.filter((t) => t._id !== selected._id);
+      const updated = tracks.filter((t) => t._id !== trackId);
       setTracks(updated);
 
       // Select next track or clear
@@ -145,6 +160,13 @@ export default function Player() {
 
   return (
     <div className="page-player">
+      {/* Real-time Notification */}
+      {notification && (
+        <div className="notification-toast">
+          {notification}
+        </div>
+      )}
+
       <button className="back-button" onClick={() => navigate("/")}>
         ← Home
       </button>

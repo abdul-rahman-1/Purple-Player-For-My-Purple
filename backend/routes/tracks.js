@@ -2,25 +2,62 @@ const express = require("express");
 const Track = require("../models/Track");
 const router = express.Router();
 
-// list all tracks
+// list all tracks - NOW REQUIRES userId to filter by group
 router.get("/", async (req, res) => {
   try {
-    const items = await Track.find()
-      .populate("addedBy", "name email")
-      .sort({ createdAt: -1 });
-    res.json(items);
+    const { userId } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    const User = require("../models/User");
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // If user is in a group, only return that group's tracks
+    if (user.groupId) {
+      const items = await Track.find({ groupId: user.groupId })
+        .populate("addedBy", "name email avatar")
+        .sort({ createdAt: -1 });
+      return res.json(items);
+    }
+
+    // If user not in group, return empty array (no tracks visible)
+    res.json([]);
   } catch (err) {
     console.error("❌ Fetch tracks error:", err);
     res.status(500).json({ error: "Failed to fetch tracks" });
   }
 });
 
-// get most played/recent song for "top song"
+// get most played/recent song for "top song" - NOW filtered by user's group
 router.get("/top-song", async (req, res) => {
   try {
-    const topTrack = await Track.findOne()
-      .populate("addedBy", "name email")
-      .sort({ createdAt: -1 });
+    const { userId } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "userId query parameter is required" });
+    }
+
+    const User = require("../models/User");
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    let topTrack;
+    
+    // If user is in a group, get top track from that group only
+    if (user.groupId) {
+      topTrack = await Track.findOne({ groupId: user.groupId })
+        .populate("addedBy", "name email avatar")
+        .sort({ createdAt: -1 });
+    }
     
     if (!topTrack) {
       return res.json(null);
@@ -67,11 +104,22 @@ router.post("/", async (req, res) => {
       });
     }
 
+    // Fetch user to get groupId
+    const User = require("../models/User");
+    const user = await User.findById(addedBy);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        error: "user_not_found", 
+        message: "User not found" 
+      });
+    }
+
     // Trim whitespace
     title = title.trim();
     artist = artist.trim();
 
-    console.log(`📝 Saving track: "${title}" by "${artist}" (source: ${source})`);
+    console.log(`📝 Saving track: "${title}" by "${artist}" (source: ${source}, groupId: ${user.groupId})`);
 
     const t = new Track({
       title,
@@ -81,6 +129,7 @@ router.post("/", async (req, res) => {
       cover,
       message: message ? message.trim() : '',
       addedBy,
+      groupId: user.groupId // IMPORTANT: Assign to user's group
     });
 
     const saved = await t.save();
@@ -89,7 +138,7 @@ router.post("/", async (req, res) => {
     // Populate addedBy before sending response
     const populated = await Track.findById(saved._id).populate(
       "addedBy",
-      "name email"
+      "name email avatar"
     );
     
     res.json(populated);
@@ -119,7 +168,7 @@ router.get("/proxy", async (req, res) => {
   }
 });
 
-// delete a track (only by user who added it)
+// delete a track (only by user who added it, and must be in same group)
 router.delete("/:id", async (req, res) => {
   try {
     const { userId } = req.body;
@@ -131,6 +180,16 @@ router.delete("/:id", async (req, res) => {
       return res.status(400).json({ 
         error: "user_id_required",
         message: "User ID is required to delete a track"
+      });
+    }
+
+    const User = require("../models/User");
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        error: "user_not_found",
+        message: "User not found"
       });
     }
 
@@ -151,6 +210,15 @@ router.delete("/:id", async (req, res) => {
       return res.status(403).json({ 
         error: "only_creator_can_delete",
         message: "Only the person who added this song can delete it"
+      });
+    }
+
+    // SECURITY: Verify track belongs to user's group (can't delete tracks from other groups)
+    if (track.groupId && user.groupId && track.groupId.toString() !== user.groupId.toString()) {
+      console.warn(`⚠️ Security: User tried to delete track from different group`);
+      return res.status(403).json({ 
+        error: "track_from_different_group",
+        message: "You cannot delete tracks from other groups"
       });
     }
 

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { initSocket, joinGroup, getSocket } from '../socket';
 
 const UserContext = createContext();
 const API_KEY = import.meta.env.VITE_API_KEY || 'purple-secret-key-samra-2025';
@@ -22,6 +23,15 @@ export function UserProvider({ children }) {
     if (storedUser) {
       const userData = JSON.parse(storedUser);
       setUser(userData);
+      
+      // Initialize WebSocket connection
+      initSocket();
+      
+      // Join group room if user has a groupId
+      if (userData.groupId) {
+        joinGroup(userData._id, userData.groupId);
+      }
+      
       // Send heartbeat to server
       heartbeat(userData._id);
       // Start heartbeat interval to keep user online
@@ -32,6 +42,11 @@ export function UserProvider({ children }) {
         if (freshData) {
           setUser(freshData);
           localStorage.setItem('purpleUser', JSON.stringify(freshData));
+          
+          // Re-join group if groupId changed
+          if (freshData.groupId && freshData.groupId !== userData.groupId) {
+            joinGroup(freshData._id, freshData.groupId);
+          }
         }
       }).catch(err => console.log('Could not refresh user data:', err.message));
     }

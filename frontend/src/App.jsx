@@ -4,6 +4,7 @@ import { UserProvider, useUser } from './context/UserContext'
 import Home from './pages/Home'
 import AddSong from './pages/AddSong'
 import Player from './pages/Player'
+import Profile from './pages/Profile'
 import LoadingScreen from './components/LoadingScreen'
 import RegistrationFlow from './components/RegistrationFlow'
 import LoginForm from './components/LoginForm'
@@ -43,6 +44,7 @@ function AppContent() {
         <Route path="/" element={<Home />} />
         <Route path="/add-song" element={<AddSong />} />
         <Route path="/player" element={<Player />} />
+        <Route path="/profile" element={<Profile />} />
       </Routes>
     </>
   )

@@ -13,9 +13,12 @@ function getHeaders(additionalHeaders = {}) {
   };
 }
 
-export async function fetchTracks(){ 
+export async function fetchTracks(userId){ 
   try {
-    const r = await fetch(API + '/tracks', {
+    if (!userId) {
+      throw new Error('userId is required');
+    }
+    const r = await fetch(API + '/tracks?userId=' + userId, {
       headers: getHeaders()
     }); 
     if (!r.ok) throw new Error(`Server error: ${r.status}`);

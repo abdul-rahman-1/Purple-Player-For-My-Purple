@@ -6,6 +6,7 @@ const TrackSchema = new mongoose.Schema({
   url: String, // the link user added
   cover: String, // optional image URL
   message: String, // personal message
-  addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+  addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: false } // Track belongs to group
 },{ timestamps:true });
 module.exports = mongoose.model('Track', TrackSchema);
