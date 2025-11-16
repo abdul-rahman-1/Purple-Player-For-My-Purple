@@ -100,9 +100,17 @@ export default function RegistrationFlow() {
       return;
     }
 
-    const strength = validatePassword(formData.password);
-    if (!strength.isValid) {
-      setError('Password does not meet all requirements');
+    // Simple client-side validation matching backend
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    const hasLetter = /[a-zA-Z]/.test(formData.password);
+    const hasNumber = /[0-9]/.test(formData.password);
+
+    if (!hasLetter || !hasNumber) {
+      setError('Password must contain at least one letter and one number');
       return;
     }
 
@@ -354,20 +362,14 @@ export default function RegistrationFlow() {
                     {getPasswordStrengthLabel(passwordStrength.score)}
                   </div>
                   <ul className="password-requirements">
-                    <li className={passwordStrength.requirements.minLength ? 'met' : 'unmet'}>
-                      {passwordStrength.requirements.minLength ? '✓' : '✗'} At least 8 characters
+                    <li className={formData.password.length >= 6 ? 'met' : 'unmet'}>
+                      {formData.password.length >= 6 ? '✓' : '✗'} At least 6 characters
                     </li>
-                    <li className={passwordStrength.requirements.hasUppercase ? 'met' : 'unmet'}>
-                      {passwordStrength.requirements.hasUppercase ? '✓' : '✗'} One uppercase letter (A-Z)
+                    <li className={/[a-zA-Z]/.test(formData.password) ? 'met' : 'unmet'}>
+                      {/[a-zA-Z]/.test(formData.password) ? '✓' : '✗'} At least one letter (a-z, A-Z)
                     </li>
-                    <li className={passwordStrength.requirements.hasLowercase ? 'met' : 'unmet'}>
-                      {passwordStrength.requirements.hasLowercase ? '✓' : '✗'} One lowercase letter (a-z)
-                    </li>
-                    <li className={passwordStrength.requirements.hasNumber ? 'met' : 'unmet'}>
-                      {passwordStrength.requirements.hasNumber ? '✓' : '✗'} One number (0-9)
-                    </li>
-                    <li className={passwordStrength.requirements.hasSpecial ? 'met' : 'unmet'}>
-                      {passwordStrength.requirements.hasSpecial ? '✓' : '✗'} One special character (!@#$%^&*)
+                    <li className={/[0-9]/.test(formData.password) ? 'met' : 'unmet'}>
+                      {/[0-9]/.test(formData.password) ? '✓' : '✗'} At least one number (0-9)
                     </li>
                   </ul>
                 </div>

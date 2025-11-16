@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const router = express.Router();
+const Group = require('../models/Group');
 
 // Utility function to generate unique 16-character code
 function generateGroupCode() {
@@ -33,10 +34,17 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
-    // Validate password strength
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
-    if (!passwordRegex.test(password)) {
-      return res.status(400).json({ error: 'Password must be 8+ chars with uppercase, lowercase, number, and special character' });
+    // Validate password strength (minimum 6 characters, at least one letter and one number)
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    
+    // Check for at least one letter and one number (more user-friendly)
+    const hasLetter = /[a-zA-Z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    
+    if (!hasLetter || !hasNumber) {
+      return res.status(400).json({ error: 'Password must contain at least one letter and one number' });
     }
 
     // Hash password
@@ -82,7 +90,7 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password required' });
+      return res.status(400).json({ error: 'Email and password are required' });
     }
 
     const user = await User.findOne({ email });
@@ -96,7 +104,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Update user status
+    // Success - update user status
     user.isOnline = true;
     user.lastSeen = new Date();
     user.sessionId = uuidv4();
@@ -116,38 +124,7 @@ router.post('/login', async (req, res) => {
     });
   } catch (err) {
     console.error('Login error:', err);
-    res.status(500).json({ error: 'Login failed' });
-  }
-});
-
-// Get user profile (with groupId and groupRole)
-router.get('/:userId', async (req, res) => {
-  try {
-    const user = await User.findById(req.params.userId)
-      .select('name email avatar sessionId isOnline isGroupMode groupId groupRole joinedGroupAt currentlyListening lastListenedSong lastSeen');
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar,
-      sessionId: user.sessionId,
-      isOnline: user.isOnline,
-      isGroupMode: user.isGroupMode,
-      groupId: user.groupId,
-      groupRole: user.groupRole,
-      joinedGroupAt: user.joinedGroupAt,
-      currentlyListening: user.currentlyListening,
-      lastListenedSong: user.lastListenedSong,
-      lastSeen: user.lastSeen
-    });
-  } catch (err) {
-    console.error('Get user error:', err);
-    res.status(500).json({ error: 'Failed to fetch user' });
+    res.status(500).json({ error: 'Login failed. Please try again.' });
   }
 });
 
@@ -513,17 +490,20 @@ router.get('/group/members/:userId', async (req, res) => {
     }
 
     // Return only group members with their details
-    const members = group.members.map(m => ({
-      userId: m.userId._id,
-      name: m.userId.name,
-      email: m.userId.email,
-      avatar: m.userId.avatar,
-      isOnline: m.userId.isOnline,
-      currentlyListening: m.userId.currentlyListening,
-      lastSeen: m.userId.lastSeen,
-      role: m.role,
-      joinedAt: m.joinedAt
-    }));
+const members = group.members
+  .filter(m => m.userId) // ✅ filter out null refs
+  .map(m => ({
+    userId: m.userId._id,
+    name: m.userId.name,
+    email: m.userId.email,
+    avatar: m.userId.avatar,
+    isOnline: m.userId.isOnline,
+    currentlyListening: m.userId.currentlyListening,
+    lastSeen: m.userId.lastSeen,
+    role: m.role,
+    joinedAt: m.joinedAt
+  }));
+
 
     res.json({
       groupId: group._id,
@@ -719,10 +699,16 @@ router.put('/change-password/:userId', async (req, res) => {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
-    // Validate new password strength
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
-    if (!passwordRegex.test(newPassword)) {
-      return res.status(400).json({ error: 'New password does not meet requirements' });
+    // Validate new password strength (minimum 6 characters, at least one letter and one number)
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    }
+    
+    const hasLetter = /[a-zA-Z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+    
+    if (!hasLetter || !hasNumber) {
+      return res.status(400).json({ error: 'New password must contain at least one letter and one number' });
     }
 
     // Hash new password
@@ -765,6 +751,7 @@ router.post('/reset-email/:userId', async (req, res) => {
 router.delete('/delete-account/:userId', async (req, res) => {
   try {
     const { password } = req.body;
+    const Group = require('../models/Group');
 
     if (!password) {
       return res.status(400).json({ error: 'Password required' });
