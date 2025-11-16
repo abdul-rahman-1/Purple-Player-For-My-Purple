@@ -16,42 +16,35 @@ function generateGroupCode() {
 // Step 1: Register user with email, name, password, and avatar
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, avatar } = req.body;
+    const { name, email, password, avatar, groupCode } = req.body;
 
-    // Validate inputs
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password required' });
     }
 
-    // Validate email format
     if (!email.includes('@')) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
-    // Validate password strength (minimum 6 characters, at least one letter and one number)
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
-    
-    // Check for at least one letter and one number (more user-friendly)
+
     const hasLetter = /[a-zA-Z]/.test(password);
     const hasNumber = /[0-9]/.test(password);
-    
     if (!hasLetter || !hasNumber) {
       return res.status(400).json({ error: 'Password must contain at least one letter and one number' });
     }
 
-    // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
     const sessionId = uuidv4();
 
-    // Create new user
+    // Create base user (no group yet)
     const user = new User({
       name,
       email,
@@ -64,23 +57,86 @@ router.post('/register', async (req, res) => {
 
     await user.save();
 
+    // ✅ CASE 1 — Join existing group using groupCode
+    if (groupCode && groupCode.trim() !== '') {
+      const existingGroup = await Group.findOne({ groupCode: groupCode.trim().toUpperCase() });
+      if (existingGroup) {
+        existingGroup.members.push({
+          userId: user._id,
+          role: 'member',
+          joinedAt: new Date()
+        });
+        await existingGroup.save();
+
+        user.isGroupMode = true;
+        user.groupId = existingGroup._id;
+        user.groupRole = 'member';
+        user.joinedGroupAt = new Date();
+        await user.save();
+
+        return res.json({
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          avatar: user.avatar,
+          isOnline: true,
+          isGroupMode: true,
+          groupId: existingGroup._id,
+          groupRole: 'member',
+          joinedGroupAt: user.joinedGroupAt,
+          groupCode: existingGroup.groupCode,
+          groupName: existingGroup.groupName,
+          message: `Joined existing group: ${existingGroup.groupName}`
+        });
+      } else {
+        // invalid code fallback
+        return res.status(404).json({ error: 'Invalid group code' });
+      }
+    }
+
+    // ✅ CASE 2 — No group code: create a new group
+    const newGroup = new Group({
+      groupName: `${name}'s Group`,
+      groupCode: generateGroupCode(),
+      members: [
+        {
+          userId: user._id,
+          role: 'admin',
+          joinedAt: new Date()
+        }
+      ],
+      totalSongs: 0,
+      totalMessages: 0
+    });
+
+    await newGroup.save();
+
+    user.isGroupMode = true;
+    user.groupId = newGroup._id;
+    user.groupRole = 'admin';
+    user.joinedGroupAt = new Date();
+    await user.save();
+
     res.json({
       _id: user._id,
       name: user.name,
       email: user.email,
       avatar: user.avatar,
-      sessionId: user.sessionId,
       isOnline: true,
-      isGroupMode: user.isGroupMode,
-      groupId: user.groupId,
-      groupRole: user.groupRole,
-      joinedGroupAt: user.joinedGroupAt
+      isGroupMode: true,
+      groupId: newGroup._id,
+      groupRole: 'admin',
+      joinedGroupAt: user.joinedGroupAt,
+      groupCode: newGroup.groupCode,
+      groupName: newGroup.groupName,
+      message: 'User registered and new group created successfully!'
     });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
   }
 });
+
 
 // ============ LOGIN ============
 
@@ -721,16 +777,22 @@ router.post('/reset-email/:userId', async (req, res) => {
 });
 
 // Delete account
+// Delete account and auto logout
 router.delete('/delete-account/:userId', async (req, res) => {
   try {
     const { password } = req.body;
-    const Group = require('../models/Group');
+    const userId = req.params.userId;
 
     if (!password) {
-      return res.status(400).json({ error: 'Password required' });
+      return res.status(400).json({ error: 'Password is required' });
     }
 
-    const user = await User.findById(req.params.userId);
+    // Import models dynamically (avoid circular refs)
+    const Group = require('../models/Group');
+    const Track = require('../models/Track');
+
+    // Find user
+    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -738,20 +800,29 @@ router.delete('/delete-account/:userId', async (req, res) => {
     // Verify password
     const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
-      return res.status(401).json({ error: 'Password is incorrect' });
+      return res.status(401).json({ error: 'Incorrect password' });
     }
 
-    // If user is in a group, remove from group
+    // --- Step 1: Mark user offline immediately
+    user.isOnline = false;
+    user.lastSeen = new Date();
+    await user.save();
+
+    // --- Step 2: Handle group cleanup
     if (user.isGroupMode && user.groupId) {
       const group = await Group.findById(user.groupId);
+
       if (group) {
-        group.members = group.members.filter(m => m.userId.toString() !== user._id.toString());
-        
+        // Remove this user from group's member list
+        group.members = group.members.filter(
+          (m) => m.userId.toString() !== user._id.toString()
+        );
+
         if (group.members.length === 0) {
-          // Delete empty group
+          // Delete group if empty
           await Group.deleteOne({ _id: group._id });
         } else if (user.groupRole === 'admin') {
-          // Assign new admin
+          // If user was admin, promote first member to admin
           group.members[0].role = 'admin';
           await group.save();
         } else {
@@ -760,18 +831,30 @@ router.delete('/delete-account/:userId', async (req, res) => {
       }
     }
 
-    // Delete all user's tracks
-    const Track = require('../models/Track');
-    await Track.deleteMany({ userId: req.params.userId });
+    // --- Step 3: Delete all user's tracks
+    await Track.deleteMany({ userId });
 
-    // Delete user
-    await User.deleteOne({ _id: req.params.userId });
+    // --- Step 4: Invalidate session globally (auto logout all devices)
+    const invalidSessionId = uuidv4(); // random new session
+    await User.updateOne(
+      { _id: userId },
+      { sessionId: invalidSessionId, isOnline: false }
+    );
 
-    res.json({ message: 'Account deleted successfully' });
+    // --- Step 5: Delete the user account
+    await User.deleteOne({ _id: userId });
+
+    // --- Step 6: Return logout instruction to frontend
+    return res.json({
+      message: 'Account deleted successfully. User logged out from all sessions.',
+      shouldLogout: true
+    });
   } catch (err) {
-    console.error('Delete account error:', err);
-    res.status(500).json({ error: 'Failed to delete account' });
+    console.error('❌ Delete account error:', err);
+    return res.status(500).json({ error: 'Failed to delete account' });
   }
 });
+
+
 
 module.exports = router;

@@ -242,36 +242,56 @@ export default function Profile() {
     password: ''
   });
 
-  const deleteAccount = async () => {
-    if (!deleteConfirm.confirmed || !deleteConfirm.password) {
-      showMessage('Please confirm and enter your password', 'error');
-      return;
-    }
+const deleteAccount = async () => {
+  if (!deleteConfirm.password || !deleteConfirm.confirmed) {
+    showMessage('Please confirm and enter your password', 'error');
+    return;
+  }
 
-    setLoading(true);
-    try {
-      const response = await fetch(import.meta.env.VITE_API_URL + `/api/users/delete-account/${user._id}`, {
+  setLoading(true);
+  try {
+    const response = await fetch(
+      import.meta.env.VITE_API_URL + `/api/users/delete-account/${user._id}`,
+      {
         method: 'DELETE',
         headers: getHeaders(),
         body: JSON.stringify({ password: deleteConfirm.password })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete account');
       }
+    );
 
-      showMessage('✅ Account deleted. Redirecting...', 'success');
-      setTimeout(() => {
-        logout();
-        window.location.href = '/';
-      }, 2000);
-    } catch (err) {
-      showMessage(err.message || 'Failed to delete account', 'error');
-    } finally {
-      setLoading(false);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to delete account');
     }
-  };
+
+    showMessage('✅ Account deleted. Logging out...', 'success');
+
+    // ✅ Step 1: Clear local storage
+    localStorage.removeItem('purpleUser');
+
+    // ✅ Step 2: Clear React user context (if logout() updates global state)
+    logout();
+
+    // ✅ Step 3: Optional — refresh backend session status if any (offline update)
+    try {
+      await fetch(import.meta.env.VITE_API_URL + `/api/users/offline/${user._id}`, {
+        method: 'POST',
+        headers: getHeaders()
+      });
+    } catch {}
+
+    // ✅ Step 4: Redirect after short delay
+    setTimeout(() => {
+      window.location.href = '/register'; // or '/login'
+    }, 1000);
+
+  } catch (err) {
+    showMessage(err.message || 'Failed to delete account', 'error');
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <div className="profile-container">
