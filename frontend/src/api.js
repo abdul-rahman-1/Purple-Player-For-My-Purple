@@ -8,7 +8,7 @@ export const API_BASE = rawBase.replace(/\/+$/, '');
 export const API = `${API_BASE}/api`;
 
 // --- ✅ API Key (default fallback if missing) ---
-export const API_KEY = import.meta.env.VITE_API_KEY || 'purple-secret-key-samra-2025';
+export const API_KEY = import.meta.env.VITE_API_KEY ;
 
 // --- ✅ Helper to add API key header ---
 export function getHeaders(extra = {}) {

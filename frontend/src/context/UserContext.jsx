@@ -32,8 +32,8 @@ export function UserProvider({ children }) {
       const userData = JSON.parse(storedUser);
       setUser(userData);
 
-      // Initialize WebSocket connection
-      initSocket();
+      // Initialize WebSocket connection with userId
+      initSocket(userData._id);
 
       // Join group room if user has a groupId
       if (userData.groupId) {
@@ -400,7 +400,8 @@ async function joinGroup(userId, groupCode) {
         await fetch(`${API}/users/offline/${user._id}`, {
           method: "PUT",
           headers: getHeaders(),
-        });
+        }); 
+        console.log('✅ User marked offline on logout');
       } catch (err) {
         console.error("Logout error:", err);
       }
@@ -408,7 +409,9 @@ async function joinGroup(userId, groupCode) {
     // Clear heartbeat interval
     if (window.heartbeatInterval) {
       clearInterval(window.heartbeatInterval);
-    }
+    }    // Disconnect socket
+    const { disconnect } = await import("../socket");
+    disconnect();
     setUser(null);
     localStorage.removeItem("purpleUser");
   }

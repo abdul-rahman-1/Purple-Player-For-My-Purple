@@ -33,8 +33,9 @@ export default function LoginForm({ onSwitchToRegister }) {
     <div className="modal-overlay">
       <div className="modal-content login-modal">
         <div className="modal-header">
-          <h2>💜 Welcome Back</h2>
-          <p>Log in to Purple Player</p>
+          <h2 className="col-12">💜 Welcome Back</h2>
+          <br />
+          <p className="col-12">Log in to Purple Player</p>
         </div>
 
         {error && <div className="modal-error">{error}</div>}

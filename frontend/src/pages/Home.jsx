@@ -186,7 +186,7 @@ export default function Home() {
               <div className="user-greeting-section">
                 <p className="user-greeting">
                   {user.email === "khansamra9005@gmail.com" 
-                    ? "Welcome, Our Beautiful Madam Ji 👑💜 - Your music, Your magic, Your moments ✨" 
+                    ? "Welcome, My Beautiful Madam Ji 👑💜 - Your music, Your magic, Your moments ✨" 
                     : user.email === "abdulrahmanstd955@gmail.com"
                     ? "Welcome, My King 👑💜 - Our Purple, Our Dreams, Our Forever 💜"
                     : `Hi, ${user.name}! 👋`}
@@ -404,7 +404,7 @@ export default function Home() {
                           Abdul Rahman
                         </a>
                       </span>{" "}
-                      for his Samra Khan
+                      for his Purple (Samra Khan)
                     </>
                   )
                   : "Made By Abdul Rahman"

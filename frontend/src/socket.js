@@ -1,10 +1,12 @@
 import io from 'socket.io-client';
 
 let socket = null;
+let currentUserId = null;
 
-export function initSocket() {
-  if (socket) return socket;
+export function initSocket(userId) {
+   if (socket) return socket;
 
+  currentUserId = userId;
   const apiUrl = import.meta.env.VITE_API_URL ;
   
   socket = io(apiUrl, {
@@ -21,6 +23,10 @@ export function initSocket() {
 
   socket.on('disconnect', () => {
     console.log('❌ Disconnected from WebSocket');
+        // Mark user offline when socket disconnects
+    if (currentUserId) {
+      markUserOffline(currentUserId);
+    }
   });
 
   socket.on('error', (error) => {
@@ -32,11 +38,30 @@ export function initSocket() {
 
 export function getSocket() {
   if (!socket) {
-    return initSocket();
+    return null;
   }
   return socket;
 }
 
+// Mark user offline on backend
+async function markUserOffline(userId) {
+  try {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+    const API_KEY = import.meta.env.VITE_API_KEY || 'purple-secret-key-samra-2025';
+    
+    await fetch(`${apiUrl}/api/users/offline/${userId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': API_KEY,
+      },
+      keepalive: true,
+    });
+    console.log('✅ User marked offline');
+  } catch (err) {
+    console.error('❌ Failed to mark user offline:', err);
+  }
+}
 export function joinGroup(userId, groupId) {
   if (!socket) initSocket();
   socket.emit('join-group', { userId, groupId });
@@ -64,9 +89,11 @@ export function onPlaylistUpdate(callback) {
   });
 }
 
+
 export function disconnect() {
   if (socket) {
     socket.disconnect();
     socket = null;
+    currentUserId = null;
   }
 }

@@ -440,13 +440,15 @@ router.get("/online", async (req, res) => {
   try {
     const userId = req.query.userId; // Optional: pass userId to get only group members
 
-    // Mark users offline if no heartbeat in 30+ seconds
-    const thirtySecondsAgo = new Date(Date.now() - 30000);
-    await User.updateMany(
-      { isOnline: true, lastSeen: { $lt: thirtySecondsAgo } },
+    // Mark users offline if no heartbeat in 60+ seconds (timeout)
+    const oneMinuteAgo = new Date(Date.now() - 60000);
+    const result = await User.updateMany(
+      { isOnline: true, lastSeen: { $lt: oneMinuteAgo } },
       { isOnline: false }
     );
-
+    if (result.modifiedCount > 0) {
+      console.log(`⏱️ Marked ${result.modifiedCount} users offline due to inactivity`);
+    }
     // If userId provided, return only their group members
     if (userId) {
       const user = await User.findById(userId);
@@ -547,6 +549,8 @@ router.post("/heartbeat/:userId", async (req, res) => {
       { lastSeen: new Date(), isOnline: true },
       { new: true }
     );
+    console.log(`💓 Heartbeat received for user: ${user?.name || req.params.userId}`);
+    
     res.json({ ok: true });
   } catch (err) {
     console.error("Heartbeat error:", err);
